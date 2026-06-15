@@ -716,18 +716,20 @@ function Dashboard({
           </div>
         </header>
 
-        <section className="stats-grid">
-          {stats.map((stat) => {
-            const Icon = stat.icon;
-            return (
-              <article key={stat.label} className="stat-card">
-                <Icon size={24} />
-                <strong>{stat.value}</strong>
-                <span>{stat.label}</span>
-              </article>
-            );
-          })}
-        </section>
+        {profile?.role !== 'student' && (
+          <section className="stats-grid">
+            {stats.map((stat) => {
+              const Icon = stat.icon;
+              return (
+                <article key={stat.label} className="stat-card">
+                  <Icon size={24} />
+                  <strong>{stat.value}</strong>
+                  <span>{stat.label}</span>
+                </article>
+              );
+            })}
+          </section>
+        )}
 
         {message && <p className="notice">{message}</p>}
 
