@@ -15,10 +15,12 @@ export async function uploadToCloudinary(file, folder = 'result-processing-syste
     method: 'POST',
     body: formData
   });
+  const data = await response.json().catch(() => null);
 
   if (!response.ok) {
-    throw new Error('Cloudinary upload failed.');
+    const detail = data?.error?.message || `HTTP ${response.status}`;
+    throw new Error(`Cloudinary upload failed: ${detail}`);
   }
 
-  return response.json();
+  return data;
 }

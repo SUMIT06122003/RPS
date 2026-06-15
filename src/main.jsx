@@ -502,6 +502,7 @@ function App() {
     <Dashboard
       profile={session.profile}
       results={results}
+      setResults={setResults}
       students={students}
       subjects={subjects}
       userCount={userCount}
@@ -617,6 +618,7 @@ function Dashboard({
   profile,
   subjects,
   results,
+  setResults,
   students,
   userCount,
   dataLoading,
@@ -802,6 +804,11 @@ function Dashboard({
                 subjects={subjects}
                 profile={profile}
                 setMessage={setMessage}
+                onResultSaved={(result) =>
+                  setResults((current) =>
+                    uniqueBy([result, ...current], (item) => item.id || `${item.enrollmentNumber}-S${item.semester || 1}`)
+                  )
+                }
               />
             )}
           </section>
@@ -835,6 +842,11 @@ function Dashboard({
                   subjects={subjects}
                   profile={profile}
                   setMessage={setMessage}
+                  onResultSaved={(result) =>
+                    setResults((current) =>
+                      uniqueBy([result, ...current], (item) => item.id || `${item.enrollmentNumber}-S${item.semester || 1}`)
+                    )
+                  }
                 />
               </aside>
             )}
@@ -1639,7 +1651,7 @@ function AnalyticsPanel({ results, students, subjects }) {
   const failed = Math.max(processed.length - passed, 0);
   const subjectPerformance = subjects.slice(0, 6).map((subject) => {
     const marks = processed.flatMap((result) =>
-      (result.marks || []).filter((mark) => mark.subjectCode === subject.code)
+      resultStats(result).marks.filter((mark) => mark.subjectCode === subject.code)
     );
     const average = marks.length
       ? Math.round(marks.reduce((sum, mark) => sum + Number(mark.total || 0), 0) / marks.length)
@@ -1715,7 +1727,7 @@ function AuditTrailPanel({ results }) {
   );
 }
 
-function ResultUploadPanel({ students, subjects, profile, setMessage }) {
+function ResultUploadPanel({ students, subjects, profile, setMessage, onResultSaved }) {
   const studentOptions = (Array.isArray(students) ? students : []).filter(
     (student) => student.username && student.displayName && student.enrollmentNumber
   );
@@ -1787,22 +1799,26 @@ function ResultUploadPanel({ students, subjects, profile, setMessage }) {
         academicYear: 'AY2026',
         status: form.status,
         uploadedBy: profile?.email || profile?.username,
-        updatedAt: serverTimestamp(),
         marks
+      };
+      const savedResult = {
+        ...resultPayload,
+        blockchain: createVerificationBlock(resultPayload),
+        adminVerification: {
+          status: 'pending'
+        }
       };
 
       await setDoc(
         resultRef,
         {
-          ...resultPayload,
-          blockchain: createVerificationBlock(resultPayload),
-          adminVerification: {
-            status: 'pending'
-          }
+          ...savedResult,
+          updatedAt: serverTimestamp()
         },
         { merge: true }
       );
 
+      onResultSaved?.(savedResult);
       setMessage(`Result uploaded for ${student.displayName} and blockchain verification hash generated.`);
       setForm((current) => ({ ...current, internal: '', external: '' }));
     } catch (error) {
