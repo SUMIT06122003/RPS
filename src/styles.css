@@ -185,19 +185,6 @@ p {
   padding: 12px;
 }
 
-.demo-users {
-  display: grid;
-  gap: 8px;
-  margin-top: 26px;
-}
-
-.demo-users button {
-  background: #f5f7fb;
-  color: #172033;
-  justify-content: space-between;
-}
-
-.demo-users small,
 .muted,
 .helper-text,
 .subject-row span,
@@ -364,6 +351,34 @@ p {
   padding: 12px;
 }
 
+.metric-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 16px 0;
+}
+
+.metric-grid article,
+.profile-card {
+  background: #f8fafc;
+  border: 1px solid #edf1f7;
+  border-radius: 8px;
+  display: grid;
+  gap: 5px;
+  padding: 14px;
+}
+
+.metric-grid span,
+.metric-grid small,
+.profile-card span {
+  color: #617089;
+}
+
+.metric-grid strong {
+  font-size: 1.65rem;
+  line-height: 1;
+}
+
 .subject-list {
   display: grid;
   gap: 10px;
@@ -372,6 +387,108 @@ p {
 .student-list {
   display: grid;
   gap: 10px;
+}
+
+.data-table {
+  border: 1px solid #edf1f7;
+  border-radius: 8px;
+  display: grid;
+  margin-top: 16px;
+  overflow: auto;
+}
+
+.table-row {
+  align-items: center;
+  border-top: 1px solid #edf1f7;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(5, minmax(110px, 1fr));
+  min-width: 620px;
+  padding: 12px;
+}
+
+.table-row:first-child {
+  border-top: 0;
+}
+
+.table-head {
+  background: #eef4ff;
+  color: #334155;
+  font-weight: 800;
+}
+
+.compact-table .table-row {
+  grid-template-columns: repeat(4, minmax(120px, 1fr));
+}
+
+.processing-table .table-row {
+  grid-template-columns: minmax(70px, 0.35fr) minmax(140px, 1fr) repeat(3, minmax(80px, 0.45fr)) minmax(130px, 0.8fr);
+}
+
+.exam-verification-table .table-row {
+  grid-template-columns: minmax(140px, 1fr) repeat(3, minmax(90px, 0.45fr)) minmax(170px, 0.8fr);
+}
+
+.verify-action {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-height: 44px;
+}
+
+.verify-action button {
+  min-height: 36px;
+  padding: 0 12px;
+}
+
+.verify-action small {
+  color: #166534;
+  font-weight: 800;
+}
+
+.verify-action .pending-status {
+  color: #92400e;
+}
+
+.hash-text {
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  overflow-wrap: anywhere;
+}
+
+.verification-card {
+  background: #f8fafc;
+  border: 1px solid #cdd7e8;
+  border-radius: 8px;
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+  padding: 14px;
+}
+
+.verification-card > div {
+  align-items: center;
+  color: #1d4ed8;
+  display: flex;
+  gap: 8px;
+}
+
+.verification-card dl {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(120px, 0.4fr) minmax(0, 1fr);
+  margin: 0;
+}
+
+.verification-card dt {
+  color: #617089;
+  font-weight: 800;
+}
+
+.verification-card dd {
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  margin: 0;
+  overflow-wrap: anywhere;
 }
 
 .student-row {
@@ -669,6 +786,7 @@ p {
   .stats-grid,
   .action-grid,
   .form-grid,
+  .metric-grid,
   .result-summary {
     grid-template-columns: 1fr;
   }

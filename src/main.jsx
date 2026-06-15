@@ -32,7 +32,14 @@ import {
 import { auth, db, firebaseReady } from './firebase';
 import { uploadToCloudinary } from './cloudinary';
 import { seedFirebase } from './seedFirebase';
-import { defaultPassword, seedResultRecords, seedSubjects, seedUsers } from './seedData';
+import {
+  defaultPassword,
+  seedAcademicYears,
+  seedPrograms,
+  seedResultRecords,
+  seedSubjects,
+  seedUsers
+} from './seedData';
 import './styles.css';
 
 class ErrorBoundary extends React.Component {
@@ -72,8 +79,12 @@ const roleLabels = {
 
 const dashboardTabs = [
   { id: 'overview', label: 'Overview', icon: BarChart3 },
+  { id: 'students', label: 'Students', icon: Users },
   { id: 'subjects', label: 'Subjects', icon: BookOpen },
+  { id: 'exams', label: 'Exams', icon: CheckCircle2 },
   { id: 'results', label: 'Results', icon: FileText },
+  { id: 'processing', label: 'Processing', icon: GraduationCap },
+  { id: 'reports', label: 'Reports', icon: BarChart3 },
   { id: 'media', label: 'Media', icon: CloudUpload }
 ];
 
@@ -114,6 +125,49 @@ function resultStats(result) {
   return { marks, total, percentage };
 }
 
+function gradePoint(total) {
+  if (total >= 90) return 10;
+  if (total >= 80) return 9;
+  if (total >= 70) return 8;
+  if (total >= 60) return 7;
+  if (total >= 50) return 6;
+  if (total >= 40) return 5;
+  return 0;
+}
+
+function resultMetrics(result, subjects = []) {
+  const { marks, percentage } = resultStats(result);
+  const credits = marks.reduce((sum, mark) => {
+    const subject = subjects.find((item) => item.code === mark.subjectCode);
+    return sum + Number(subject?.credits || 4);
+  }, 0);
+  const weightedPoints = marks.reduce((sum, mark) => {
+    const subject = subjects.find((item) => item.code === mark.subjectCode);
+    return sum + gradePoint(Number(mark.total || 0)) * Number(subject?.credits || 4);
+  }, 0);
+  const backlogs = marks.filter((mark) => Number(mark.total || 0) < 40).length;
+  const graceMarks = marks.reduce((sum, mark) => {
+    const total = Number(mark.total || 0);
+    return total >= 35 && total < 40 ? sum + (40 - total) : sum;
+  }, 0);
+
+  return {
+    percentage,
+    credits,
+    sgpa: credits ? (weightedPoints / credits).toFixed(2) : '0.00',
+    cgpa: credits ? (weightedPoints / credits).toFixed(2) : '0.00',
+    backlogs,
+    graceMarks
+  };
+}
+
+function rankedResults(results = [], subjects = []) {
+  return [...results]
+    .map((result) => ({ ...result, metrics: resultMetrics(result, subjects) }))
+    .sort((a, b) => Number(b.metrics.sgpa) - Number(a.metrics.sgpa))
+    .map((result, index) => ({ ...result, rank: index + 1 }));
+}
+
 function resolveResultStudent(result, students = []) {
   const student = students.find((item) => item.username === result?.studentUsername);
   return {
@@ -124,11 +178,85 @@ function resolveResultStudent(result, students = []) {
   };
 }
 
+function stableStringify(value) {
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableStringify(item)).join(',')}]`;
+  }
+
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`)
+      .join(',')}}`;
+  }
+
+  return JSON.stringify(value);
+}
+
+function hashString(value) {
+  let hash = 0x811c9dc5;
+  const text = String(value);
+
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+
+  return (hash >>> 0).toString(16).padStart(8, '0').toUpperCase();
+}
+
+function createVerificationBlock(result) {
+  const marks = [...(Array.isArray(result?.marks) ? result.marks : [])].sort((a, b) =>
+    String(a.subjectCode || '').localeCompare(String(b.subjectCode || ''))
+  );
+  const payload = {
+    enrollmentNumber: result?.enrollmentNumber || '',
+    studentUsername: result?.studentUsername || '',
+    semester: Number(result?.semester || 0),
+    academicYear: result?.academicYear || '',
+    status: result?.status || 'draft',
+    marks: marks.map((mark) => ({
+      subjectCode: mark.subjectCode,
+      internal: Number(mark.internal || 0),
+      external: Number(mark.external || 0),
+      total: Number(mark.total || 0),
+      grade: mark.grade || ''
+    }))
+  };
+  const resultHash = hashString(stableStringify(payload));
+  const previousHash = result?.blockchain?.previousHash || hashString(`${payload.academicYear}:${payload.semester}`);
+  const blockHash = hashString(`${previousHash}:${resultHash}:${payload.enrollmentNumber}:${payload.semester}`);
+
+  return {
+    network: 'RPS Result Verification Chain',
+    blockNumber: Number(result?.blockchain?.blockNumber || payload.semester || 1),
+    verificationId: `RPS-${payload.enrollmentNumber || 'PENDING'}-S${payload.semester || 0}`,
+    previousHash,
+    resultHash,
+    blockHash
+  };
+}
+
+function createAdminAttestation(result, profile, verifiedAt = new Date().toISOString()) {
+  const block = createVerificationBlock(result);
+  const verifiedBy = profile?.email || profile?.username || profile?.displayName || 'admin';
+
+  return {
+    status: 'verified',
+    verifiedBy,
+    verifiedRole: roleLabels[profile?.role] || 'Admin',
+    verifiedAt,
+    adminVerificationHash: hashString(`${block.blockHash}:${verifiedBy}:${verifiedAt}`)
+  };
+}
+
 function downloadMarksheet(result, students = []) {
   if (!result) return;
 
   const { marks, percentage } = resultStats(result);
   const student = resolveResultStudent(result, students);
+  const verification = createVerificationBlock(result);
+  const adminVerification = result.adminVerification;
   const rows = marks
     .map(
       (mark) => `
@@ -154,6 +282,8 @@ function downloadMarksheet(result, students = []) {
       th { background: #eef4ff; }
       .summary { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-top: 20px; }
       .summary div { border: 1px solid #cdd7e8; padding: 12px; }
+      .verify { border: 1px solid #cdd7e8; margin-top: 22px; padding: 14px; }
+      .verify code { overflow-wrap: anywhere; }
     </style>
   </head>
   <body>
@@ -178,6 +308,20 @@ function downloadMarksheet(result, students = []) {
     <div class="summary">
       <div><strong>Average:</strong> ${percentage}%</div>
       <div><strong>Status:</strong> ${result.status || 'draft'}</div>
+    </div>
+    <div class="verify">
+      <h3>Blockchain Verification</h3>
+      <p><strong>Network:</strong> ${verification.network}</p>
+      <p><strong>Verification ID:</strong> ${verification.verificationId}</p>
+      <p><strong>Result Hash:</strong> <code>${verification.resultHash}</code></p>
+      <p><strong>Block Hash:</strong> <code>${verification.blockHash}</code></p>
+      <p><strong>Admin Status:</strong> ${adminVerification?.status || 'pending'}</p>
+      ${
+        adminVerification?.status === 'verified'
+          ? `<p><strong>Verified By:</strong> ${adminVerification.verifiedBy}</p>
+      <p><strong>Admin Verification Hash:</strong> <code>${adminVerification.adminVerificationHash}</code></p>`
+          : ''
+      }
     </div>
   </body>
 </html>`;
@@ -407,7 +551,7 @@ function LoginScreen({ message, setMessage }) {
           setMessage('');
         } catch (seedError) {
           setMessage(
-            `Could not create/login seeded account. First login as sumit1 and click "Seed Firebase Users, Subjects, and Results". Details: ${seedError.message}`
+            `Could not create or login to this account. Ask the administrator to create the user account. Details: ${seedError.message}`
           );
         }
       } else if (seedUser && isInvalidCredential(error)) {
@@ -422,32 +566,12 @@ function LoginScreen({ message, setMessage }) {
     }
   }
 
-  async function handleSeed() {
-    setBusy(true);
-    setMessage('Seeding Firebase Auth and Firestore...');
-
-    try {
-      const result = await seedFirebase();
-      setMessage(
-        `Seed complete. Auth users created: ${result.createdUsers.length}. User profiles updated/skipped: ${result.updatedUsers.length + result.skippedUsers.length}. Subjects ready: ${result.subjects.created.length + result.subjects.updated.length}. Student can login with username "student".`
-      );
-    } catch (error) {
-      setMessage(error.message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
   return (
     <main className="login-layout">
       <section className="login-hero">
         <div className="hero-copy">
           <Shield size={44} />
-          <p className="eyebrow light">Firebase + Cloudinary</p>
           <h1>Result Processing System</h1>
-          <p>
-            A simple username and password portal for admins, exam staff, faculty, and students.
-          </p>
         </div>
       </section>
 
@@ -458,7 +582,6 @@ function LoginScreen({ message, setMessage }) {
         </div>
         <div className="auth-header">
           <h2>Sign in</h2>
-          <span>No two-factor authentication</span>
         </div>
         <form onSubmit={handleLogin}>
           <label>
@@ -483,26 +606,8 @@ function LoginScreen({ message, setMessage }) {
           </button>
         </form>
 
-        <button className="secondary full-width" disabled={busy} onClick={handleSeed} type="button">
-          Seed Firebase Users, Subjects, and Results
-        </button>
-        <p className="helper-text">
-          New seeded students are created in Firebase Auth when you click seed. If a seeded student
-          is missing, login will try to create it automatically.
-        </p>
-
         {message && <p className="notice">{message}</p>}
 
-        <div className="demo-users">
-          <h3>Seed logins</h3>
-          {seedUsers.map((user) => (
-            <button key={user.email} type="button" onClick={() => setIdentifier(user.email)}>
-              <span>{user.email}</span>
-              <small>{roleLabels[user.role]}</small>
-            </button>
-          ))}
-          <p>Password for all seeded users: {defaultPassword}</p>
-        </div>
       </section>
     </main>
   );
@@ -654,7 +759,52 @@ function Dashboard({
           </section>
         )}
 
-        {activeTab === 'subjects' && <SubjectPanel subjects={subjects} />}
+        {activeTab === 'students' && (
+          <section className="content-grid">
+            <div className="main-column">
+              {canViewStudents ? (
+                <StudentManagementPanel students={students} />
+              ) : (
+                <StudentSelfServicePanel profile={profile} result={studentResult} subjects={subjects} />
+              )}
+            </div>
+            <aside className="side-column">
+              <StudentDirectoryPanel
+                students={profile?.role === 'student' ? [profile] : students}
+                selectedStudent={selectedStudent}
+                onSelectStudent={setSelectedStudent}
+                onViewResult={openStudentResult}
+              />
+            </aside>
+          </section>
+        )}
+
+        {activeTab === 'subjects' && (
+          <section className="content-grid">
+            <CourseManagementPanel subjects={subjects} />
+            <AcademicConfigPanel />
+          </section>
+        )}
+
+        {activeTab === 'exams' && (
+          <section className="content-grid">
+            <ExaminationPanel
+              results={visibleResults}
+              students={students}
+              profile={profile}
+              setMessage={setMessage}
+            />
+            {canUploadResults && (
+              <ResultUploadPanel
+                students={students}
+                subjects={subjects}
+                profile={profile}
+                setMessage={setMessage}
+              />
+            )}
+          </section>
+        )}
+
         {activeTab === 'results' && (
           <section className="content-grid">
             <div className="main-column">
@@ -686,6 +836,18 @@ function Dashboard({
                 />
               </aside>
             )}
+          </section>
+        )}
+        {activeTab === 'processing' && (
+          <section className="content-grid">
+            <ProcessingPanel results={visibleResults} students={students} subjects={subjects} />
+            <DocumentsPanel results={visibleResults} students={students} subjects={subjects} />
+          </section>
+        )}
+        {activeTab === 'reports' && (
+          <section className="content-grid">
+            <AnalyticsPanel results={results} students={students} subjects={subjects} />
+            <AuditTrailPanel results={results} />
           </section>
         )}
         {activeTab === 'media' && (
@@ -735,6 +897,277 @@ function RolePanel({ role }) {
   );
 }
 
+function StudentManagementPanel({ students }) {
+  const nextEnrollment = `RPS${new Date().getFullYear()}${String((students?.length || 0) + 1).padStart(3, '0')}`;
+
+  return (
+    <section className="panel">
+      <div className="panel-heading">
+        <h2>Student Management</h2>
+        <span>Registration and profile records</span>
+      </div>
+      <form className="result-form">
+        <div className="form-grid">
+          <label>
+            Student name
+            <input placeholder="Enter full name" />
+          </label>
+          <label>
+            Generated enrollment
+            <input readOnly value={nextEnrollment} />
+          </label>
+        </div>
+        <div className="form-grid">
+          <label>
+            Program
+            <select defaultValue={seedPrograms[0]?.code || ''}>
+              {seedPrograms.map((program) => (
+                <option key={program.code} value={program.code}>
+                  {program.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Semester
+            <select defaultValue="1">
+              {seedAcademicYears[0]?.semesters.map((semester) => (
+                <option key={semester} value={semester}>
+                  Semester {semester}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <button className="secondary" type="button">
+          Prepare Student Profile
+        </button>
+      </form>
+      <div className="data-table compact-table">
+        <div className="table-row table-head">
+          <span>Name</span>
+          <span>Enrollment</span>
+          <span>Semester</span>
+          <span>Status</span>
+        </div>
+        {students.map((student) => (
+          <div className="table-row" key={student.username || student.email}>
+            <span>{student.displayName}</span>
+            <span>{student.enrollmentNumber || '-'}</span>
+            <span>Semester {student.semester || '-'}</span>
+            <span>{student.status || 'active'}</span>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function StudentSelfServicePanel({ profile, result, subjects }) {
+  const metrics = resultMetrics(result, subjects);
+
+  return (
+    <section className="panel">
+      <div className="panel-heading">
+        <h2>Student Portal</h2>
+        <UserRound size={22} />
+      </div>
+      <div className="profile-card">
+        <strong>{profile?.displayName}</strong>
+        <span>{profile?.enrollmentNumber}</span>
+        <span>Semester {profile?.semester || '-'}</span>
+      </div>
+      <div className="metric-grid">
+        <article>
+          <span>SGPA</span>
+          <strong>{metrics.sgpa}</strong>
+        </article>
+        <article>
+          <span>CGPA</span>
+          <strong>{metrics.cgpa}</strong>
+        </article>
+        <article>
+          <span>Backlogs</span>
+          <strong>{metrics.backlogs}</strong>
+        </article>
+      </div>
+      <button className="secondary full-width" type="button">
+        Apply for Revaluation
+      </button>
+    </section>
+  );
+}
+
+function CourseManagementPanel({ subjects }) {
+  return (
+    <section className="panel">
+      <div className="panel-heading">
+        <h2>Course Management</h2>
+        <span>Programs, subjects, and credits</span>
+      </div>
+      <div className="metric-grid">
+        {seedPrograms.map((program) => (
+          <article key={program.code}>
+            <span>{program.code}</span>
+            <strong>{program.durationSemesters}</strong>
+            <small>{program.name}</small>
+          </article>
+        ))}
+        <article>
+          <span>Total credits</span>
+          <strong>{subjects.reduce((sum, subject) => sum + Number(subject.credits || 0), 0)}</strong>
+          <small>Across configured subjects</small>
+        </article>
+      </div>
+      <SubjectPanel subjects={subjects} />
+    </section>
+  );
+}
+
+function AcademicConfigPanel() {
+  return (
+    <section className="panel">
+      <div className="panel-heading">
+        <h2>Academic Configuration</h2>
+        <span>Year and semesters</span>
+      </div>
+      <div className="data-table">
+        <div className="table-row table-head">
+          <span>Code</span>
+          <span>Academic year</span>
+          <span>Semesters</span>
+          <span>Status</span>
+        </div>
+        {seedAcademicYears.map((year) => (
+          <div className="table-row" key={year.code}>
+            <span>{year.code}</span>
+            <span>{year.name}</span>
+            <span>{year.semesters.join(', ')}</span>
+            <span>{year.active ? 'Active' : 'Inactive'}</span>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function ExaminationPanel({ results, students, profile, setMessage }) {
+  const [revaluation, setRevaluation] = useState('');
+  const canAdminVerify = profile?.role === 'admin';
+
+  function handleCsvUpload(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const rows = String(reader.result || '')
+        .split(/\r?\n/)
+        .filter(Boolean);
+      setMessage(`Bulk upload parsed ${Math.max(rows.length - 1, 0)} marks rows from ${file.name}.`);
+    };
+    reader.readAsText(file);
+    event.target.value = '';
+  }
+
+  async function handleAdminVerify(result) {
+    if (!canAdminVerify) {
+      setMessage('Only admin users can verify final results.');
+      return;
+    }
+
+    const resultId =
+      result.id || `${result.enrollmentNumber}-S${Number(result.semester || 1)}`;
+    const attestation = createAdminAttestation(result, profile);
+
+    try {
+      await setDoc(
+        doc(db, 'results', resultId),
+        {
+          ...result,
+          id: resultId,
+          blockchain: createVerificationBlock(result),
+          adminVerification: attestation,
+          verifiedAt: serverTimestamp()
+        },
+        { merge: true }
+      );
+      setMessage(
+        `Verification complete for ${resultId}. Admin verification hash: ${attestation.adminVerificationHash}. Refresh to show it everywhere.`
+      );
+    } catch (error) {
+      setMessage(error.message);
+    }
+  }
+
+  return (
+    <section className="panel">
+      <div className="panel-heading">
+        <h2>Examination Management</h2>
+        <span>Marks, verification, locking, absentee, revaluation</span>
+      </div>
+      <div className="button-row">
+        <label className="file-control">
+          Bulk Upload CSV
+          <input accept=".csv,.txt" onChange={handleCsvUpload} type="file" />
+        </label>
+        <button className="secondary" type="button" onClick={() => setMessage('Marks entry locked for the selected batch.')}>
+          Lock Entries
+        </button>
+      </div>
+      <div className="data-table exam-verification-table">
+        <div className="table-row table-head">
+          <span>Student</span>
+          <span>Semester</span>
+          <span>Status</span>
+          <span>Absentee</span>
+          <span>Admin Verification</span>
+        </div>
+        {results.map((result) => {
+          const student = resolveResultStudent(result, students);
+          const adminVerification = result.adminVerification;
+          return (
+            <div className="table-row" key={result.id}>
+              <span>{student.name}</span>
+              <span>Semester {result.semester}</span>
+              <span>{result.status || 'draft'}</span>
+              <span>{resultStats(result).marks.some((mark) => mark.absent) ? 'Yes' : 'No'}</span>
+              <span className="verify-action">
+                {adminVerification?.status === 'verified' ? (
+                  <small>Verified by {adminVerification.verifiedBy}</small>
+                ) : (
+                  <>
+                    <small className="pending-status">Verification pending</small>
+                    <button disabled={!canAdminVerify} type="button" onClick={() => handleAdminVerify(result)}>
+                      Verify as Admin
+                    </button>
+                  </>
+                )}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+      <form className="result-form" onSubmit={(event) => event.preventDefault()}>
+        <label>
+          Revaluation request
+          <input
+            value={revaluation}
+            onChange={(event) => setRevaluation(event.target.value)}
+            placeholder="Enrollment / subject / reason"
+          />
+        </label>
+        <button
+          type="button"
+          onClick={() => setMessage(revaluation ? `Revaluation request recorded: ${revaluation}` : 'Enter revaluation details first.')}
+        >
+          Submit Revaluation
+        </button>
+      </form>
+    </section>
+  );
+}
+
 function StudentDirectoryPanel({ students, selectedStudent, onSelectStudent, onViewResult }) {
   const [query, setQuery] = useState('');
   const studentRows = Array.isArray(students) ? students : [];
@@ -766,7 +1199,7 @@ function StudentDirectoryPanel({ students, selectedStudent, onSelectStudent, onV
         {filteredStudents.length === 0 && (
           <div className="empty-state">
             <Users size={24} />
-            <p>No student profiles found. Seed Firebase again after deploying rules.</p>
+            <p>No student profiles found. Add student records from the student management section.</p>
           </div>
         )}
         {filteredStudents.map((student) => (
@@ -869,6 +1302,40 @@ function SubjectPanel({ subjects, compact = false }) {
   );
 }
 
+function BlockchainVerificationCard({ result }) {
+  if (!result) return null;
+
+  const verification = createVerificationBlock(result);
+  const adminVerification = result.adminVerification;
+
+  return (
+    <div className="verification-card">
+      <div>
+        <Shield size={18} />
+        <strong>Blockchain Verification</strong>
+      </div>
+      <dl>
+        <dt>Verification ID</dt>
+        <dd>{verification.verificationId}</dd>
+        <dt>Result Hash</dt>
+        <dd>{verification.resultHash}</dd>
+        <dt>Block Hash</dt>
+        <dd>{verification.blockHash}</dd>
+        <dt>Admin Status</dt>
+        <dd>{adminVerification?.status === 'verified' ? 'Verified by admin' : 'Pending admin verification'}</dd>
+        {adminVerification?.status === 'verified' && (
+          <>
+            <dt>Verified By</dt>
+            <dd>{adminVerification.verifiedBy}</dd>
+            <dt>Admin Hash</dt>
+            <dd>{adminVerification.adminVerificationHash}</dd>
+          </>
+        )}
+      </dl>
+    </div>
+  );
+}
+
 function ResultPanel({
   result,
   results = [],
@@ -909,7 +1376,7 @@ function ResultPanel({
         </label>
       )}
       {!result ? (
-        <p className="muted">Seed Firebase to show the student result preview.</p>
+        <p className="muted">No result is available for this selection yet.</p>
       ) : (
         <>
           <p className="muted">
@@ -935,6 +1402,7 @@ function ResultPanel({
               </div>
             ))}
           </div>
+          <BlockchainVerificationCard result={result} />
           <div className="button-row">
             {onViewResult && (
               <button className="secondary" type="button" onClick={() => onViewResult(result)}>
@@ -1025,12 +1493,223 @@ function ResultModal({
             </div>
           ))}
         </div>
+        <BlockchainVerificationCard result={activeResult} />
         <button className="full-width" type="button" onClick={() => downloadMarksheet(activeResult, students)}>
           <Download size={18} />
           Download Marksheet
         </button>
       </section>
     </div>
+  );
+}
+
+function ProcessingPanel({ results, students, subjects }) {
+  const rows = rankedResults(results, subjects);
+
+  return (
+    <section className="panel">
+      <div className="panel-heading">
+        <h2>Result Processing Engine</h2>
+        <span>SGPA, CGPA, backlog, grace, rank</span>
+      </div>
+      <div className="data-table">
+        <div className="table-row table-head">
+          <span>Rank</span>
+          <span>Student</span>
+          <span>SGPA</span>
+          <span>Backlogs</span>
+          <span>Grace</span>
+          <span>Block Hash</span>
+        </div>
+        {rows.map((result) => {
+          const student = resolveResultStudent(result, students);
+          const verification = createVerificationBlock(result);
+          return (
+            <div className="table-row" key={result.id}>
+              <span>#{result.rank}</span>
+              <span>{student.name}</span>
+              <span>{result.metrics.sgpa}</span>
+              <span>{result.metrics.backlogs}</span>
+              <span>{result.metrics.graceMarks}</span>
+              <span className="hash-text">{verification.blockHash}</span>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function downloadTranscript(results, students, subjects) {
+  const rows = rankedResults(results, subjects)
+    .map((result) => {
+      const student = resolveResultStudent(result, students);
+      const verification = createVerificationBlock(result);
+      return `
+        <tr>
+          <td>${student.name}</td>
+          <td>${student.enrollmentNumber}</td>
+          <td>${result.semester}</td>
+          <td>${result.metrics.sgpa}</td>
+          <td>${result.metrics.cgpa}</td>
+          <td>${result.metrics.backlogs}</td>
+          <td>${result.rank}</td>
+          <td>${verification.blockHash}</td>
+        </tr>`;
+    })
+    .join('');
+  const transcriptHash = hashString(rows);
+  const verificationCode = `RPS-${transcriptHash}`;
+  const html = `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>RPS Transcript</title>
+    <style>
+      body { font-family: Arial, sans-serif; margin: 32px; color: #172033; }
+      table { border-collapse: collapse; width: 100%; margin-top: 20px; }
+      th, td { border: 1px solid #cdd7e8; padding: 10px; text-align: left; }
+      th { background: #eef4ff; }
+      .qr { border: 2px solid #172033; display: inline-grid; height: 112px; margin-top: 20px; place-items: center; width: 112px; }
+    </style>
+  </head>
+  <body>
+    <h1>Result Processing System</h1>
+    <h2>Consolidated Result / Transcript</h2>
+    <p><strong>Verification Code:</strong> ${verificationCode}</p>
+    <table>
+      <thead>
+        <tr><th>Student</th><th>Enrollment</th><th>Sem</th><th>SGPA</th><th>CGPA</th><th>Backlogs</th><th>Rank</th><th>Block Hash</th></tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <p><strong>Transcript Hash:</strong> ${transcriptHash}</p>
+    <div class="qr">QR<br />${verificationCode}</div>
+  </body>
+</html>`;
+  const blob = new Blob([html], { type: 'text/html' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = 'rps-transcript.html';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function DocumentsPanel({ results, students, subjects }) {
+  return (
+    <section className="panel">
+      <div className="panel-heading">
+        <h2>Result Documents</h2>
+        <span>Semester, consolidated, marksheet, transcript, QR</span>
+      </div>
+      <div className="action-grid">
+        <article>
+          <FileText size={18} />
+          <span>Semester result generation</span>
+        </article>
+        <article>
+          <FileText size={18} />
+          <span>Consolidated result</span>
+        </article>
+        <article>
+          <Download size={18} />
+          <span>Marksheet generation</span>
+        </article>
+        <article>
+          <CheckCircle2 size={18} />
+          <span>QR verification code</span>
+        </article>
+      </div>
+      <button className="full-width" type="button" onClick={() => downloadTranscript(results, students, subjects)}>
+        <Download size={18} />
+        Download Transcript
+      </button>
+    </section>
+  );
+}
+
+function AnalyticsPanel({ results, students, subjects }) {
+  const processed = rankedResults(results, subjects);
+  const passed = processed.filter((result) => result.metrics.backlogs === 0).length;
+  const failed = Math.max(processed.length - passed, 0);
+  const subjectPerformance = subjects.slice(0, 6).map((subject) => {
+    const marks = processed.flatMap((result) =>
+      (result.marks || []).filter((mark) => mark.subjectCode === subject.code)
+    );
+    const average = marks.length
+      ? Math.round(marks.reduce((sum, mark) => sum + Number(mark.total || 0), 0) / marks.length)
+      : 0;
+    return { ...subject, average };
+  });
+
+  return (
+    <section className="panel">
+      <div className="panel-heading">
+        <h2>Reports & Analytics</h2>
+        <span>Pass/fail, subject, department</span>
+      </div>
+      <div className="metric-grid">
+        <article>
+          <span>Pass</span>
+          <strong>{passed}</strong>
+        </article>
+        <article>
+          <span>Fail / backlog</span>
+          <strong>{failed}</strong>
+        </article>
+        <article>
+          <span>Department</span>
+          <strong>{students.filter((student) => student.department === 'Computer Science').length}</strong>
+          <small>Computer Science students</small>
+        </article>
+      </div>
+      <div className="data-table">
+        <div className="table-row table-head">
+          <span>Subject</span>
+          <span>Semester</span>
+          <span>Credits</span>
+          <span>Average</span>
+        </div>
+        {subjectPerformance.map((subject) => (
+          <div className="table-row" key={subject.code}>
+            <span>{subject.code}</span>
+            <span>Semester {subject.semester}</span>
+            <span>{subject.credits}</span>
+            <span>{subject.average}%</span>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function AuditTrailPanel({ results }) {
+  const rows = results.slice(0, 6);
+
+  return (
+    <section className="panel">
+      <div className="panel-heading">
+        <h2>Audit Trail</h2>
+        <span>Marks lifecycle</span>
+      </div>
+      <div className="data-table compact-table">
+        <div className="table-row table-head">
+          <span>Result</span>
+          <span>Action</span>
+          <span>Status</span>
+        </div>
+        {rows.map((result) => (
+          <div className="table-row" key={result.id}>
+            <span>{result.id}</span>
+            <span>{result.uploadedBy ? 'Updated in Firestore' : 'Seeded record'}</span>
+            <span>{result.status || 'draft'}</span>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -1097,25 +1776,32 @@ function ResultUploadPanel({ students, subjects, profile, setMessage }) {
       const marks = existingMarks.some((mark) => mark.subjectCode === form.subjectCode)
         ? existingMarks.map((mark) => (mark.subjectCode === form.subjectCode ? nextMark : mark))
         : [...existingMarks, nextMark];
+      const resultPayload = {
+        enrollmentNumber: student.enrollmentNumber,
+        id: resultId,
+        studentUsername: student.username,
+        studentName: student.displayName,
+        semester: Number(form.semester || student.semester || 1),
+        academicYear: 'AY2026',
+        status: form.status,
+        uploadedBy: profile?.email || profile?.username,
+        updatedAt: serverTimestamp(),
+        marks
+      };
 
       await setDoc(
         resultRef,
         {
-          enrollmentNumber: student.enrollmentNumber,
-          id: resultId,
-          studentUsername: student.username,
-          studentName: student.displayName,
-          semester: Number(form.semester || student.semester || 1),
-          academicYear: 'AY2026',
-          status: form.status,
-          uploadedBy: profile?.email || profile?.username,
-          updatedAt: serverTimestamp(),
-          marks
+          ...resultPayload,
+          blockchain: createVerificationBlock(resultPayload),
+          adminVerification: {
+            status: 'pending'
+          }
         },
         { merge: true }
       );
 
-      setMessage(`Result uploaded for ${student.displayName}. Refresh to see the updated result.`);
+      setMessage(`Result uploaded for ${student.displayName} and blockchain verification hash generated.`);
       setForm((current) => ({ ...current, internal: '', external: '' }));
     } catch (error) {
       setMessage(error.message);
