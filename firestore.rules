@@ -1,0 +1,79 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function currentUser() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function isAdmin() {
+      return signedIn() && currentUser().data.role == 'admin';
+    }
+
+    function isExam() {
+      return signedIn() && currentUser().data.role == 'exam_department';
+    }
+
+    function isFaculty() {
+      return signedIn() && currentUser().data.role == 'faculty';
+    }
+
+    function canViewStudents() {
+      return isAdmin() || isExam() || isFaculty();
+    }
+
+    function canManageResults() {
+      return isAdmin() || isExam();
+    }
+
+    match /users/{userId} {
+      allow read: if signedIn() && (
+        request.auth.uid == userId ||
+        isAdmin() ||
+        ((isExam() || isFaculty()) && resource.data.role == 'student')
+      );
+      allow create: if signedIn() && request.auth.uid == userId;
+      allow update, delete: if isAdmin();
+    }
+
+    match /usernameAliases/{username} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /roles/{roleId} {
+      allow read: if signedIn();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /programs/{programId} {
+      allow read: if signedIn();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /academicYears/{yearId} {
+      allow read: if signedIn();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /subjects/{subjectId} {
+      allow read: if signedIn();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /results/{resultId} {
+      allow read: if signedIn();
+      allow create, update: if canManageResults();
+      allow delete: if isAdmin();
+    }
+
+    match /media/{mediaId} {
+      allow read: if signedIn();
+      allow create: if signedIn();
+      allow update, delete: if isAdmin();
+    }
+  }
+}

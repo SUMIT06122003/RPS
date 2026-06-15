@@ -1,0 +1,164 @@
+RESULT PROCESSING SYSTEM - LOGIN AND SEED DATA
+================================================
+
+Default password for every seeded user:
+Password@123
+
+Use either username or email on the login screen.
+
+If any seeded student shows "auth/invalid-credential", that account is not created in
+Firebase Auth yet. Login as admin sumit1 and click:
+Seed Firebase Users, Subjects, and Results
+
+The app also tries to auto-create missing seeded users when the seeded password is used.
+
+
+SEMESTER RESULT VIEWING
+-----------------------
+Student users can select an available semester before viewing or downloading the marksheet.
+Admin, exam, and faculty users can select a student and then view/download that student's
+semester result.
+
+
+ADMIN LOGINS
+------------
+1. Admin Name: Sumit
+   Username: sumit1
+   Email: sumit.admin1@rps.local
+   Password: Password@123
+   Role: Admin
+   Can see: all student data, subjects, results, media, environment status
+   Can do: seed database, upload/update result, manage admin-level records
+
+2. Admin Name: Sumit
+   Username: sumit2
+   Email: sumit.admin2@rps.local
+   Password: Password@123
+   Role: Admin
+   Can see: all student data, subjects, results, media, environment status
+   Can do: upload/update result and view all seeded records
+
+
+EXAM DEPARTMENT LOGIN
+---------------------
+Name: Examination Department
+Username: exam
+Email: exam@rps.local
+Password: Password@123
+Role: Examination Department
+Can see: student data, subjects, results
+Can do: upload/update student results
+
+
+FACULTY LOGIN
+-------------
+Name: Priya Sharma
+Username: faculty
+Email: faculty@rps.local
+Password: Password@123
+Employee ID: FAC-CS-001
+Department: Computer Science
+Role: Faculty
+Can see: student data, subjects, results
+Can do: view student academic records
+
+
+STUDENT LOGINS
+--------------
+1. Name: Aarav Mehta
+   Username: student
+   Email: student@rps.local
+   Password: Password@123
+   Enrollment Number: RPS2026001
+   Semester: 1
+   Department: Computer Science
+   Can see: own result only
+
+2. Name: Neha Singh
+   Username: student2
+   Email: student.neha@rps.local
+   Password: Password@123
+   Enrollment Number: RPS2026002
+   Semester: 1
+   Department: Computer Science
+   Can see: own result only
+
+3. Name: Rohan Verma
+   Username: student3
+   Email: student.rohan@rps.local
+   Password: Password@123
+   Enrollment Number: RPS2026003
+   Semester: 1
+   Department: Computer Science
+   Can see: own result only
+
+4. Name: Sana Khan
+   Username: student4
+   Email: student.sana@rps.local
+   Password: Password@123
+   Enrollment Number: RPS2026004
+   Semester: 2
+   Department: Computer Science
+   Can see: own result only
+
+5. Name: Vikram Rao
+   Username: student5
+   Email: student.vikram@rps.local
+   Password: Password@123
+   Enrollment Number: RPS2026005
+   Semester: 2
+   Department: Computer Science
+   Can see: own result only
+
+
+SEEDED SUBJECTS
+---------------
+CS101 - Programming Fundamentals - Semester 1 - 4 credits
+CS102 - Computer Organization - Semester 1 - 4 credits
+MA101 - Engineering Mathematics I - Semester 1 - 4 credits
+CS151 - Programming Lab - Semester 1 - 2 credits
+CS201 - Data Structures - Semester 2 - 4 credits
+CS202 - Database Management Systems - Semester 2 - 4 credits
+CS203 - Operating Systems - Semester 2 - 4 credits
+CS251 - Database Lab - Semester 2 - 2 credits
+
+
+SEEDED RESULT RECORDS
+---------------------
+RPS2026001 - Aarav Mehta - Semester 1 - Draft
+CS101: 82 A
+CS102: 75 B+
+MA101: 85 A
+CS151: 85 A
+
+RPS2026002 - Neha Singh - Semester 1 - Draft
+CS101: 70 B+
+CS102: 82 A
+MA101: 65 B
+CS151: 81 A
+
+RPS2026003 - Rohan Verma - Semester 1 - Published
+CS101: 62 B
+CS102: 67 B
+MA101: 58 C
+CS151: 77 B+
+
+RPS2026004 - Sana Khan - Semester 2 - Published
+CS201: 87 A
+CS202: 83 A
+CS203: 79 B+
+CS251: 89 A
+
+RPS2026005 - Vikram Rao - Semester 2 - Draft
+CS201: 62 B
+CS202: 57 C
+CS203: 66 B
+CS251: 73 B+
+
+
+IMPORTANT SETUP NOTE
+--------------------
+After these seed values change, open the app as admin and click:
+Seed Firebase Users, Subjects, and Results
+
+Then logout and test each role login.
